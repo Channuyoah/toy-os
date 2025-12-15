@@ -1,9 +1,11 @@
 ; toy-os
 ; TAB=4
+; boot.asm
+BITS 16
+ORG 0x7C00
 
-ORG   0x7c00        ;指明程序的装载地址
-JMP   short entry
-NOP
+    jmp short start
+    nop
 
 ; ===== FAT12 BPB =====
 OEMLabel        db 'TOYOS   '     ; 8 bytes
@@ -28,34 +30,53 @@ VolumeLabel    db 'TOYOS      '   ; 11 bytes
 FileSystem     db 'FAT12   '      ; 8 bytes
 ; ====================
 
-; 程序核心
-entry:
-    XOR   AX,AX        ;初始化寄存器
-    MOV   DS,AX
-    MOV   ES,AX
-    MOV   SS,AX
-    MOV   SP,0x7c00
+start:
+    cli
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+    mov sp, 0x7C00
+    sti
 
-    MOV   SI,msg
-putloop:
-    MOV   AL,[SI]
-    INC   SI
-    CMP   AL,0
-    JE    fin
+    ; BIOS会把启动驱动器号放在DL
+    mov [boot_drive], dl
 
-    MOV   AH,0x0e     ; 显示一个文字
-    MOV   BX,0x000f      ; 指定字符颜色
-    INT   0x10        ; 调用显卡BIOS
-    JMP   putloop
-fin:
-    HLT               ; 让CPU停止 (等待指令)
-    JMP   fin         ; 无限循环
+    ; 调试：证明 boot 在跑
+    mov ah, 0x0e
+    mov al, 'B'
+    int 0x10
 
-msg:
-    DB    0x0a,0x0a   ; 换行2次
-    DB    "Hello, World!"
-    DB    0x0a        ; 换行
-    DB    0
+    ; 先设置ES
+    mov ax, 0x1000 
+    mov es, ax             ; loader -> 0x10000
+    mov bx, 0x0000
+
+    ; 再准备int 13参数 读 loader（假设 1 扇区）
+    mov ah, 0x02
+    mov al, 1              ; 扇区数
+    mov ch, 0
+    mov cl, 2              ; 从第 2 个扇区开始
+    mov dh, 0
+    mov dl, [boot_drive]
+
+    int 0x13
+    jc disk_error
+
+    ; 调试：证明 boot 成功读取内存
+    mov ah, 0x0e
+    mov al, 'R'
+    int 0x10
+
+    ; 跳转到 loader
+    jmp 0x1000:0x0000
+
+disk_error:
+    mov al, 'A'
+    int 0x10
+    jmp $
+
+boot_drive db 0
 
 times 510-($-$$) db 0
-dw  0xaa55
+dw 0xAA55
